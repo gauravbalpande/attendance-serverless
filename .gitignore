@@ -32,3 +32,4 @@ build/
 frontend/config.env.local.js
 
 config.env.js
+DEPLOYMENT_GUIDE.md
