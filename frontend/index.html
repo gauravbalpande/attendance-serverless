@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Face Recognition Attendance</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&display=swap"
+    rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+
+<body>
+  <div class="app">
+    <header class="header">
+      <h1>Face Recognition Attendance</h1>
+      <p class="subtitle">Capture your face for check-in</p>
+    </header>
+
+    <main class="main">
+      <div class="card auth-card">
+        <div id="authStatus" class="auth-status">Not logged in</div>
+        <button type="button" id="logoutBtn" class="btn btn-secondary hidden"
+          style="margin-bottom:1rem;">Logout</button>
+
+        <!-- Login Section -->
+        <div id="loginSection">
+          <h3>Login</h3>
+          <form id="loginForm" class="login-form">
+            <input type="email" id="loginEmail" placeholder="Email" autocomplete="username" required>
+            <input type="password" id="loginPassword" placeholder="Password" autocomplete="current-password" required>
+            <div class="controls">
+              <button type="submit" id="loginBtn" class="btn btn-accent">Login</button>
+            </div>
+          </form>
+          <p class="hint">Don't have an account? <a href="#" id="showSignup" class="auth-link">Sign Up</a></p>
+        </div>
+
+        <!-- Sign Up Section (hidden by default) -->
+        <div id="signupSection" class="hidden">
+          <h3>Sign Up</h3>
+          <form id="signupForm" class="login-form">
+            <input type="email" id="signupEmail" placeholder="Email" autocomplete="email" required>
+            <input type="password" id="signupPassword" placeholder="Password (min 8 chars)" autocomplete="new-password"
+              required>
+            <input type="password" id="signupConfirmPassword" placeholder="Confirm Password" autocomplete="new-password"
+              required>
+            <div class="controls">
+              <button type="submit" id="signupBtn" class="btn btn-accent">Sign Up</button>
+            </div>
+          </form>
+          <div id="signupConfirmSection" class="hidden" style="margin-top:1rem;">
+            <input type="text" id="signupCode" placeholder="Verification code from email" required>
+            <button type="button" id="signupConfirmBtn" class="btn btn-accent">Verify</button>
+          </div>
+          <p class="hint">Already have an account? <a href="#" id="showLogin" class="auth-link">Login</a></p>
+        </div>
+
+        <!-- New Password Section (shown when Cognito requires password change) -->
+        <div id="newPasswordSection" class="hidden">
+          <h3>Set New Password</h3>
+          <p class="hint" style="margin-bottom:0.75rem;">Your account requires a new password before you can continue.
+          </p>
+          <input type="password" id="newPassword" placeholder="New password (min 8 chars)" autocomplete="new-password">
+          <input type="password" id="newPasswordConfirm" placeholder="Confirm new password" autocomplete="new-password">
+          <div class="controls">
+            <button type="button" id="newPasswordBtn" class="btn btn-accent">Set Password & Login</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card capture-card">
+        <div class="video-container">
+          <video id="video" autoplay playsinline muted></video>
+          <canvas id="canvas" class="hidden"></canvas>
+          <div id="placeholder" class="placeholder">
+            <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+              <circle cx="12" cy="7" r="4" />
+            </svg>
+            <p>Camera preview</p>
+          </div>
+        </div>
+        <div class="controls">
+          <button id="startCamera" class="btn btn-primary">Start Camera</button>
+          <button id="captureBtn" class="btn btn-accent" disabled>Capture & Check In</button>
+        </div>
+      </div>
+
+      <div id="result" class="card result-card hidden">
+        <div id="resultIcon" class="result-icon"></div>
+        <h2 id="resultTitle">Processing...</h2>
+        <p id="resultMessage"></p>
+        <p id="resultTimestamp" class="timestamp"></p>
+      </div>
+
+      <div class="card analytics-card">
+        <h3>Today's Summary</h3>
+        <div id="analytics" class="analytics-placeholder">
+          <p>Loading analytics...</p>
+        </div>
+      </div>
+
+      <div class="card enroll-card">
+        <h3>Enroll New Employee</h3>
+        <form id="enrollForm">
+          <input type="text" id="employeeId" placeholder="Employee ID" required>
+          <input type="text" id="empName" placeholder="Full Name">
+          <input type="email" id="empEmail" placeholder="Email">
+          <input type="text" id="empDept" placeholder="Department">
+          <div class="enroll-actions">
+            <button type="button" id="captureEnroll" class="btn btn-secondary">Capture Photo</button>
+            <button type="submit" class="btn btn-accent" disabled>Enroll</button>
+          </div>
+        </form>
+      </div>
+    </main>
+
+    <footer class="footer">
+      <p>Powered by AWS Rekognition • Images auto-deleted after 48 hours</p>
+    </footer>
+  </div>
+
+  <!-- Set window.API_BASE in config.env.js (created at deploy) -->
+  <script src="config.env.js?v=2"></script>
+  <script src="config.js?v=2"></script>
+  <script src="https://unpkg.com/amazon-cognito-identity-js@6.3.12/dist/amazon-cognito-identity.min.js"></script>
+  <script src="auth.js?v=2"></script>
+  <script src="app.js?v=2"></script>
+</body>
+
+</html>

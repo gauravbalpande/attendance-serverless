@@ -1,0 +1,300 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Serverless Attendance System - Face Recognition
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - staging
+      - prod
+
+Globals:
+  Function:
+    Timeout: 30
+    Runtime: python3.12
+    MemorySize: 512
+
+Resources:
+  # S3 Bucket for image uploads
+  AttendanceImageBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub attendance-images-${AWS::AccountId}-${Environment}
+      CorsConfiguration:
+        CorsRules:
+          - AllowedHeaders: ['*']
+            AllowedMethods: [GET, PUT, POST]
+            AllowedOrigins: ['*']
+            ExposedHeaders: ['ETag']
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteTempImages
+            Status: Enabled
+            ExpirationInDays: 2
+            Prefix: uploads/
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  # Rekognition collection is created automatically on first IndexFaces call
+
+  # DynamoDB Tables
+  EmployeesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub attendance-employees-${Environment}
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: employeeId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: employeeId
+          KeyType: HASH
+      SSESpecification:
+        SSEEnabled: true
+
+  AttendanceTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub attendance-logs-${Environment}
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: employeeId
+          AttributeType: S
+        - AttributeName: checkInDate
+          AttributeType: S
+        - AttributeName: timestamp
+          AttributeType: S
+      KeySchema:
+        - AttributeName: employeeId
+          KeyType: HASH
+        - AttributeName: checkInDate
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: date-timestamp-index
+          KeySchema:
+            - AttributeName: checkInDate
+              KeyType: HASH
+            - AttributeName: timestamp
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      SSESpecification:
+        SSEEnabled: true
+
+  # Lambda: Process attendance (triggered by S3 or API)
+  ProcessAttendanceFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub attendance-process-${Environment}
+      Handler: handlers.process_attendance.handler
+      CodeUri: src/
+      Environment:
+        Variables:
+          COLLECTION_ID: !Sub attendance-faces-${Environment}
+          ATTENDANCE_TABLE: !Ref AttendanceTable
+          EMPLOYEES_TABLE: !Ref EmployeesTable
+          BUCKET_NAME: !Sub attendance-images-${AWS::AccountId}-${Environment}
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - rekognition:SearchFacesByImage
+                - rekognition:DetectFaces
+                - rekognition:CreateCollection
+                - rekognition:DescribeCollection
+              Resource: '*'
+            - Effect: Allow
+              Action:
+                - dynamodb:PutItem
+                - dynamodb:GetItem
+                - dynamodb:Query
+                - dynamodb:ConditionCheckItem
+              Resource:
+                - !GetAtt AttendanceTable.Arn
+                - !GetAtt EmployeesTable.Arn
+            - Effect: Allow
+              Action: s3:GetObject
+              Resource: !Sub arn:aws:s3:::attendance-images-${AWS::AccountId}-${Environment}/*
+      Events:
+        S3Trigger:
+          Type: S3
+          Properties:
+            Bucket: !Ref AttendanceImageBucket
+            Events: s3:ObjectCreated:*
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: prefix
+                    Value: uploads/attendance/
+        ApiCheckAttendance:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AttendanceApi
+            Path: /check-attendance
+            Method: POST
+
+  # Lambda: Get presigned URL for upload
+  GetUploadUrlFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub attendance-upload-url-${Environment}
+      Handler: handlers.get_upload_url.handler
+      CodeUri: src/
+      Environment:
+        Variables:
+          BUCKET_NAME: !Ref AttendanceImageBucket
+      Policies:
+        - S3CrudPolicy:
+            BucketName: !Ref AttendanceImageBucket
+      Events:
+        ApiUploadUrl:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AttendanceApi
+            Path: /upload-url
+            Method: POST
+
+  # Lambda: Enroll employee (index face)
+  EnrollEmployeeFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub attendance-enroll-${Environment}
+      Handler: handlers.enroll_employee.handler
+      CodeUri: src/
+      Environment:
+        Variables:
+          COLLECTION_ID: !Sub attendance-faces-${Environment}
+          EMPLOYEES_TABLE: !Ref EmployeesTable
+          BUCKET_NAME: !Ref AttendanceImageBucket
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - rekognition:IndexFaces
+                - rekognition:CreateCollection
+                - rekognition:DescribeCollection
+              Resource: '*'
+            - Effect: Allow
+              Action:
+                - dynamodb:PutItem
+                - dynamodb:GetItem
+              Resource: !GetAtt EmployeesTable.Arn
+            - Effect: Allow
+              Action: s3:GetObject
+              Resource: !Sub ${AttendanceImageBucket.Arn}/uploads/enrollment/*
+      Events:
+        ApiEnroll:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AttendanceApi
+            Path: /enroll
+            Method: POST
+
+  # Lambda: Get analytics
+  GetAnalyticsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub attendance-analytics-${Environment}
+      Handler: handlers.analytics.handler
+      CodeUri: src/
+      Environment:
+        Variables:
+          ATTENDANCE_TABLE: !Ref AttendanceTable
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref AttendanceTable
+      Events:
+        ApiAnalytics:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AttendanceApi
+            Path: /analytics
+            Method: GET
+
+  # Cognito (integrated auth)
+  AttendanceUserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub attendance-users-${Environment}
+      UsernameAttributes:
+        - email
+      AutoVerifiedAttributes:
+        - email
+      MfaConfiguration: "OFF"
+      AccountRecoverySetting:
+        RecoveryMechanisms:
+          - Name: verified_email
+            Priority: 1
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireSymbols: false
+          RequireUppercase: true
+      Schema:
+        - Name: email
+          Required: true
+          Mutable: true
+        - Name: name
+          Required: false
+          Mutable: true
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: false
+
+  AttendanceUserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      UserPoolId: !Ref AttendanceUserPool
+      ClientName: !Sub attendance-web-${Environment}
+      ExplicitAuthFlows:
+        - ALLOW_USER_PASSWORD_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+        - ALLOW_USER_SRP_AUTH
+      PreventUserExistenceErrors: ENABLED
+      GenerateSecret: false
+
+  # API Gateway
+  AttendanceApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: !Sub attendance-api-${Environment}
+      StageName: Prod
+      Auth:
+        DefaultAuthorizer: CognitoAuthorizer
+        AddDefaultAuthorizerToCorsPreflight: false
+        Authorizers:
+          CognitoAuthorizer:
+            UserPoolArn: !GetAtt AttendanceUserPool.Arn
+      Cors:
+        AllowMethods: "'GET,POST,OPTIONS'"
+        AllowHeaders: "'Content-Type,Authorization'"
+        AllowOrigin: "'*'"
+
+Outputs:
+  ApiEndpoint:
+    Description: API Gateway endpoint URL
+    Value: !Sub https://${AttendanceApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/
+    Export:
+      Name: !Sub ${AWS::StackName}-ApiEndpoint
+  ImageBucketName:
+    Description: S3 bucket for attendance images
+    Value: !Ref AttendanceImageBucket
+  CollectionId:
+    Description: Rekognition collection ID
+    Value: !Sub attendance-faces-${Environment}
+
+  CognitoUserPoolId:
+    Description: Cognito User Pool ID
+    Value: !Ref AttendanceUserPool
+  CognitoUserPoolClientId:
+    Description: Cognito User Pool App Client ID
+    Value: !Ref AttendanceUserPoolClient
